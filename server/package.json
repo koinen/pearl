@@ -1,0 +1,25 @@
+{
+  "name": "pearl-server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "PEARL proof of concept: chat widget, AI Agent, Operator dashboard",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.4.0",
+    "express": "^5.3.0",
+    "ioredis": "^6.0.0",
+    "pg": "^8.23.1",
+    "ws": "^8.22.1"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.6.6",
+    "@types/pg": "^8.23.1",
+    "@types/ws": "^8.18.2",
+    "typescript": "^7.0.2"
+  }
+}

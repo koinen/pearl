@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kopi Nusantara · demo store</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font: 15px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; color: #2b2118; background: #faf6f1; }
+    header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; padding: 14px 20px; background: #3b2a1e; color: #fff; }
+    header a { color: #fff; text-decoration: none; font-weight: 700; font-size: 18px; }
+    header label { font-size: 13px; opacity: .9; }
+    header select { margin-left: 6px; padding: 4px 6px; border-radius: 6px; border: 0; font: inherit; }
+    .demo-note { background: #fff4d6; color: #6b4e00; padding: 8px 20px; font-size: 13px; }
+    main { max-width: 1000px; margin: 0 auto; padding: 24px 16px 120px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; }
+    .card { background: #fff; border-radius: 12px; padding: 16px; text-decoration: none; color: inherit; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+    .card:hover { box-shadow: 0 4px 14px rgba(0,0,0,.12); }
+    .emoji { font-size: 44px; }
+    .price { color: #9a5b13; font-weight: 700; }
+    .detail { display: grid; grid-template-columns: 1fr 1.4fr; gap: 28px; background: #fff; border-radius: 14px; padding: 28px; }
+    .detail .emoji { font-size: 120px; text-align: center; }
+    .detail button { padding: 10px 18px; border: 0; border-radius: 8px; background: #9a5b13; color: #fff; font: inherit; cursor: pointer; }
+    .back { display: inline-block; margin-bottom: 14px; color: #9a5b13; }
+    @media (max-width: 640px) { .detail { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <header>
+    <a href="#/">☕ Kopi Nusantara</a>
+    <label>Logged in as
+      <select id="login">
+        <option value="">Guest (Visitor)</option>
+        <option value="cust-ani">Ani Wijaya (Customer)</option>
+        <option value="cust-budi">Budi Santoso (Customer)</option>
+      </select>
+    </label>
+  </header>
+  <div class="demo-note">Demo Merchant site for PEARL. Stay on a product page for about 8 seconds after moving the mouse and the AI Agent will start a chat. The Operator dashboard is at <a href="/dashboard/" target="_blank">/dashboard/</a>.</div>
+  <main id="app">Loading…</main>
+
+  <!-- The Merchant's embed snippet -->
+  <script src="/widget.js" data-merchant="demo"></script>
+
+  <script>
+    const app = document.getElementById("app");
+    const login = document.getElementById("login");
+    const rupiah = (n) => "Rp" + n.toLocaleString("id-ID");
+    let products = [];
+
+    // Remember the demo login across reloads; Identify the Visitor when they are a logged-in customer.
+    try { login.value = localStorage.getItem("store.login") || ""; } catch (e) {}
+    if (login.value) PEARL.identify(login.value);
+    login.addEventListener("change", () => {
+      try { localStorage.setItem("store.login", login.value); } catch (e) {}
+      PEARL.reset();               // a new person at the keyboard is a new Visitor
+      if (login.value) PEARL.identify(login.value);
+      route();
+    });
+
+    function el(tag, attrs = {}, ...children) {
+      const node = document.createElement(tag);
+      Object.entries(attrs).forEach(([k, v]) => (k === "class" ? (node.className = v) : node.setAttribute(k, v)));
+      children.forEach((c) => node.append(c));
+      return node;
+    }
+
+    function renderList() {
+      PEARL.viewing(null);
+      app.replaceChildren(
+        el("h1", {}, "Fresh from Indonesian farms"),
+        el("div", { class: "grid" }, ...products.map((p) =>
+          el("a", { class: "card", href: `#/p/${p.id}` },
+            el("div", { class: "emoji" }, p.emoji),
+            el("div", {}, el("strong", {}, p.name)),
+            el("div", { class: "price" }, rupiah(p.price)),
+          ),
+        )),
+      );
+    }
+
+    function renderProduct(p) {
+      PEARL.viewing(p.id);
+      app.replaceChildren(
+        el("a", { class: "back", href: "#/" }, "← All products"),
+        el("div", { class: "detail" },
+          el("div", { class: "emoji" }, p.emoji),
+          el("div", {},
+            el("h1", {}, p.name),
+            el("p", { class: "price" }, rupiah(p.price)),
+            el("p", {}, p.description),
+            el("button", { type: "button", onclick: "alert('Checkout is out of scope for the PEARL demo.')" }, "Add to cart"),
+          ),
+        ),
+      );
+    }
+
+    function route() {
+      const match = location.hash.match(/^#\/p\/(\d+)/);
+      const product = match && products.find((p) => p.id === Number(match[1]));
+      product ? renderProduct(product) : renderList();
+      window.scrollTo(0, 0);
+    }
+
+    fetch("/api/merchants/demo/products")
+      .then((r) => r.json())
+      .then((list) => { products = list; route(); });
+    window.addEventListener("hashchange", route);
+  </script>
+</body>
+</html>

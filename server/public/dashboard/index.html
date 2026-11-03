@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PEARL Operator Dashboard</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; height: 100vh; display: flex; flex-direction: column; font: 14px/1.45 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; color: #1d2330; background: #eef1f3; }
+    header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; padding: 10px 16px; background: #0f766e; color: #fff; }
+    header b { font-size: 16px; }
+    header input { padding: 5px 8px; border-radius: 6px; border: 0; font: inherit; width: 150px; }
+    .mode { font-size: 12px; opacity: .85; }
+    .cols { flex: 1; display: grid; grid-template-columns: 280px 1fr 300px; min-height: 0; }
+    .col { min-height: 0; overflow-y: auto; border-right: 1px solid #d8dde1; background: #fff; }
+    .col:last-child { border-right: 0; background: #f8fafb; }
+    h2 { margin: 0; padding: 12px 14px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: #6b7280; border-bottom: 1px solid #e5e8eb; }
+    .conv { padding: 10px 14px; border-bottom: 1px solid #eef0f2; cursor: pointer; }
+    .conv:hover { background: #f5f7f8; }
+    .conv.active { background: #e6f4f2; }
+    .conv.closed { opacity: .5; }
+    .conv .top { display: flex; justify-content: space-between; gap: 8px; }
+    .conv .last { color: #6b7280; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .badge { font-size: 11px; padding: 1px 7px; border-radius: 10px; background: #e5e8eb; white-space: nowrap; }
+    .badge.waiting { background: #fde68a; color: #7c4a03; font-weight: 600; }
+    .badge.operator { background: #cdeee9; color: #0f5d56; }
+    .thread { display: flex; flex-direction: column; background: #f5f7f8; }
+    .thread-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 10px 14px; background: #fff; border-bottom: 1px solid #e5e8eb; }
+    .thread-head button, .composer button, .sugg button { border: 0; border-radius: 7px; padding: 6px 12px; font: inherit; cursor: pointer; background: #0f766e; color: #fff; }
+    .thread-head button.secondary { background: #e5e8eb; color: #1d2330; }
+    .log { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 8px; }
+    .msg { max-width: 75%; padding: 8px 11px; border-radius: 12px; white-space: pre-wrap; word-wrap: break-word; background: #fff; border: 1px solid #e3e7ea; }
+    .msg small { display: block; font-size: 11px; color: #6b7280; }
+    .msg.visitor { align-self: flex-start; }
+    .msg.ai_agent, .msg.operator { align-self: flex-end; background: #e6f4f2; border-color: #c7e7e2; }
+    .msg.system { align-self: center; background: none; border: 0; color: #6b7280; font-size: 12px; }
+    .pcard { display: flex; gap: 8px; align-items: center; margin-top: 6px; padding: 6px 8px; border-radius: 8px; background: #fff; border: 1px solid #e3e7ea; }
+    .pcard .e { font-size: 22px; }
+    .composer { display: flex; gap: 6px; padding: 10px; background: #fff; border-top: 1px solid #e5e8eb; }
+    .composer input { flex: 1; padding: 8px; border: 1px solid #d5dadf; border-radius: 8px; font: inherit; }
+    .composer input:disabled { background: #f3f4f6; }
+    .ctx { padding: 12px 14px; border-bottom: 1px solid #e5e8eb; }
+    .ctx p { margin: 4px 0; }
+    .muted { color: #6b7280; }
+    .sugg { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px dashed #e5e8eb; }
+    .sugg .e { font-size: 24px; }
+    .sugg div { flex: 1; }
+    .sugg button:disabled, .composer button:disabled { background: #a7b0b8; cursor: not-allowed; }
+    .empty { padding: 40px; text-align: center; color: #6b7280; }
+    .toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: #1d2330; color: #fff; padding: 8px 14px; border-radius: 8px; display: none; }
+    @media (max-width: 900px) { .cols { grid-template-columns: 1fr; grid-auto-rows: minmax(260px, auto); overflow-y: auto; } .col { border-right: 0; border-bottom: 1px solid #d8dde1; } }
+  </style>
+</head>
+<body>
+  <header>
+    <div><b>PEARL</b> · Operator dashboard <span class="mode" id="mode"></span></div>
+    <label>Operator name <input id="opname" placeholder="e.g. Rina"></label>
+  </header>
+  <div class="cols">
+    <section class="col"><h2>Conversations</h2><div id="list"></div></section>
+    <section class="col thread" id="thread"><div class="empty">Select a Conversation</div></section>
+    <section class="col"><h2>Context &amp; Cross-sell</h2><div id="ctx"><div class="empty">—</div></div></section>
+  </div>
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const rupiah = (n) => "Rp" + n.toLocaleString("id-ID");
+    const conversations = new Map();
+    let selectedId = null;
+    let detail = null; // { conversation, messages, context }
+    let ws;
+
+    const opInput = $("opname");
+    try { opInput.value = localStorage.getItem("pearl.operatorName") || ""; } catch (e) {}
+    opInput.addEventListener("input", () => { try { localStorage.setItem("pearl.operatorName", opInput.value.trim()); } catch (e) {} renderThread(); renderContext(); });
+    const me = () => opInput.value.trim();
+
+    function el(tag, attrs = {}, ...children) {
+      const node = document.createElement(tag);
+      for (const [k, v] of Object.entries(attrs)) {
+        if (k === "class") node.className = v;
+        else if (k.startsWith("on")) node.addEventListener(k.slice(2), v);
+        else if (k === "disabled") node.disabled = v;
+        else node.setAttribute(k, v);
+      }
+      children.flat().forEach((c) => c != null && node.append(c));
+      return node;
+    }
+
+    function toast(text) {
+      const t = $("toast"); t.textContent = text; t.style.display = "block";
+      clearTimeout(toast.timer); toast.timer = setTimeout(() => (t.style.display = "none"), 3500);
+    }
+
+    function badge(c) {
+      if (c.status === "closed") return el("span", { class: "badge" }, "closed");
+      if (c.responder === "ai_agent") return el("span", { class: "badge" }, "AI Agent");
+      if (!c.operatorName) return el("span", { class: "badge waiting" }, "Handoff · waiting");
+      return el("span", { class: "badge operator" }, c.operatorName);
+    }
+    const who = (c) => c.customerName || `Visitor ${c.visitorId.slice(0, 6)}`;
+
+    function renderList() {
+      const sorted = [...conversations.values()].sort((a, b) =>
+        (a.status === "open" ? 0 : 1) - (b.status === "open" ? 0 : 1) || b.lastActivityAt.localeCompare(a.lastActivityAt));
+      $("list").replaceChildren(...(sorted.length ? sorted.map((c) =>
+        el("div", { class: `conv ${c.id === selectedId ? "active" : ""} ${c.status}`, onclick: () => select(c.id) },
+          el("div", { class: "top" }, el("strong", {}, who(c)), badge(c)),
+          el("div", { class: "last" }, c.lastMessage || "…"),
+        )) : [el("div", { class: "empty" }, "No Conversations yet. Open the demo store.")]));
+    }
+
+    function canReply() {
+      const c = detail?.conversation;
+      return c && c.status === "open" && c.responder === "operator" && c.operatorName === me() && me();
+    }
+
+    function productCard(p) {
+      return el("div", { class: "pcard" }, el("span", { class: "e" }, p.emoji), el("div", {}, el("b", {}, p.name), " · ", rupiah(p.price)));
+    }
+
+    function renderThread() {
+      const box = $("thread");
+      if (!detail) return box.replaceChildren(el("div", { class: "empty" }, "Select a Conversation"));
+      const c = detail.conversation;
+      const actions = [];
+      if (c.status === "open" && c.operatorName !== me()) {
+        actions.push(el("button", { onclick: () => act("take") }, c.responder === "ai_agent" ? "Take over from AI Agent" : "Take"));
+      }
+      if (c.status === "open") actions.push(el("button", { class: "secondary", onclick: () => act("close") }, "Close"));
+      const log = el("div", { class: "log" }, detail.messages.map((m) =>
+        el("div", { class: `msg ${m.sender}` },
+          m.sender !== "system" ? el("small", {}, m.sender === "visitor" ? who(c) : m.senderName) : null,
+          m.body || null,
+          m.product ? productCard(m.product) : null,
+        )));
+      const input = el("input", { placeholder: canReply() ? "Reply…" : "Take the Conversation to reply", disabled: !canReply() });
+      const form = el("form", { class: "composer", onsubmit: (e) => {
+        e.preventDefault();
+        if (!input.value.trim()) return;
+        act("send", { body: input.value.trim() });
+        input.value = "";
+      } }, input, el("button", { type: "submit", disabled: !canReply() }, "Send"));
+      box.replaceChildren(el("div", { class: "thread-head" }, el("div", {}, el("strong", {}, who(c)), " ", badge(c)), el("div", {}, ...actions)), log, form);
+      log.scrollTop = log.scrollHeight;
+    }
+
+    function renderContext() {
+      if (!detail) return $("ctx").replaceChildren(el("div", { class: "empty" }, "—"));
+      const x = detail.context;
+      $("ctx").replaceChildren(
+        el("div", { class: "ctx" },
+          el("p", {}, el("strong", {}, x.customerName ? `Customer: ${x.customerName}` : "Visitor (not identified)")),
+          el("p", { class: "muted" }, x.viewing ? `Viewing: ${x.viewing.emoji} ${x.viewing.name}` : "Not on a product page"),
+        ),
+        el("div", { class: "ctx" },
+          el("p", {}, el("strong", {}, "Past orders")),
+          x.pastOrders.length ? x.pastOrders.map((o) => el("p", { class: "muted" }, `${o.product.emoji} ${o.product.name} · ${new Date(o.orderedAt).toLocaleDateString()}`))
+            : el("p", { class: "muted" }, x.customerId ? "None" : "Unknown until the Visitor is identified"),
+        ),
+        el("div", { class: "ctx" },
+          el("p", {}, el("strong", {}, "Cross-sell Suggestions")),
+          x.suggestions.length ? x.suggestions.map((p) => el("div", { class: "sugg" },
+            el("span", { class: "e" }, p.emoji),
+            el("div", {}, el("b", {}, p.name), el("br"), el("span", { class: "muted" }, rupiah(p.price))),
+            el("button", { disabled: !canReply(), onclick: () => act("send", { productId: p.id, body: `This goes well with it: ${p.name}` }) }, "Send"),
+          )) : el("p", { class: "muted" }, "None"),
+        ),
+      );
+    }
+
+    function act(type, extra = {}) {
+      if ((type === "take" || type === "send") && !me()) { opInput.focus(); return toast("Enter your Operator name first"); }
+      ws.send(JSON.stringify({ type, conversationId: selectedId, operatorName: me(), ...extra }));
+    }
+
+    function select(id) {
+      selectedId = id;
+      renderList();
+      ws.send(JSON.stringify({ type: "open", conversationId: id }));
+    }
+
+    let refreshTimer;
+    function refreshDetailSoon() {
+      clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(() => selectedId && ws.send(JSON.stringify({ type: "open", conversationId: selectedId })), 150);
+    }
+
+    function connect() {
+      ws = new WebSocket(location.origin.replace(/^http/, "ws") + "/ws/operator?merchant=demo");
+      ws.onmessage = (evt) => {
+        const msg = JSON.parse(evt.data);
+        if (msg.type === "conversations") {
+          $("mode").textContent = `· AI Agent: ${msg.aiAgent}`;
+          conversations.clear();
+          msg.conversations.forEach((c) => conversations.set(c.id, c));
+          renderList();
+          if (selectedId) refreshDetailSoon();
+        } else if (msg.type === "conversation") {
+          const prev = conversations.get(msg.conversation.id);
+          conversations.set(msg.conversation.id, msg.conversation);
+          if (msg.conversation.handedOffAt && !msg.conversation.operatorName && (!prev || !prev.handedOffAt)) {
+            toast(`Handoff: ${who(msg.conversation)} is waiting for an Operator`);
+          }
+          renderList();
+          if (msg.conversation.id === selectedId) refreshDetailSoon();
+        } else if (msg.type === "message") {
+          if (msg.message.conversationId === selectedId) refreshDetailSoon();
+        } else if (msg.type === "detail") {
+          if (msg.conversation.id !== selectedId) return;
+          detail = msg;
+          conversations.set(msg.conversation.id, msg.conversation);
+          renderList(); renderThread(); renderContext();
+        } else if (msg.type === "error") {
+          toast(msg.error);
+        }
+      };
+      ws.onclose = () => setTimeout(connect, 1500);
+    }
+    connect();
+  </script>
+</body>
+</html>
